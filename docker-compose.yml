@@ -1,0 +1,13 @@
+services:
+  ui:
+    build: ../callsheet-ui
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+  api:
+    build: ../callsheet-api
+    # Not exposed to the host — all traffic reaches the API through the Nginx proxy in the ui container
+    environment:
+      - PORT=8080
