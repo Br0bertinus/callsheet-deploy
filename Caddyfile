@@ -1,0 +1,3 @@
+{$CALLSHEET_HOST} {
+    reverse_proxy ui:80
+}
