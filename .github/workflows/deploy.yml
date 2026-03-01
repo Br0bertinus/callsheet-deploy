@@ -3,6 +3,8 @@ name: Deploy
 on:
   push:
     branches: [main]
+  repository_dispatch:
+    types: [deploy]
 
 jobs:
   deploy:
@@ -14,4 +16,9 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: ~/projects/callsheet-deploy/scripts/deploy.sh
+          script: |
+            cat > ~/projects/callsheet-deploy/.env <<'EOF'
+            TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+            CALLSHEET_HOST=${{ secrets.CALLSHEET_HOST }}
+            EOF
+            ~/projects/callsheet-deploy/scripts/deploy.sh

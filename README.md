@@ -17,7 +17,7 @@ projects/
 Internet
   │
   ▼ :80 (redirect) / :443 (HTTPS)
-Caddy  ──── automatic TLS via Let's Encrypt (sslip.io domain)
+Caddy  ──── automatic TLS via Let's Encrypt
   │
   ▼ :80 (internal)
 Nginx (inside the UI container)
@@ -159,12 +159,13 @@ Note: GitHub no longer accepts passwords for HTTPS clones. If your repos are pri
 cd ~/projects/callsheet-deploy
 cat > .env <<'EOF'
 TMDB_API_KEY=your_tmdb_api_key_here
-CALLSHEET_HOST=<server-public-ip>.sslip.io
+CALLSHEET_HOST=callsheet.your-domain.com
 EOF
 ```
 
-Replace `<server-public-ip>` with the actual IP (e.g. `163.192.44.127.sslip.io`).
-[sslip.io](https://sslip.io) resolves `<ip>.sslip.io` to `<ip>` — no DNS registration needed, and Caddy can obtain a real Let's Encrypt cert for it automatically.
+Replace `callsheet.your-domain.com` with your actual hostname (see [Custom domain setup](#custom-domain-setup) below).
+
+If you don't have a domain yet, you can use `<server-public-ip>.sslip.io` as a temporary hostname — [sslip.io](https://sslip.io) resolves `<ip>.sslip.io` to `<ip>` with no DNS registration needed.
 
 ### 9. First deploy
 
@@ -175,13 +176,75 @@ chmod +x ~/projects/callsheet-deploy/scripts/deploy.sh
 
 The first build takes a few minutes. When it completes, all three containers should show `Up` in the status table.
 
-The app will be live at `https://<server-public-ip>.sslip.io` once Caddy obtains its TLS certificate (usually a few seconds after first request).
+The app will be live at your configured hostname once Caddy obtains its TLS certificate (usually a few seconds after first request).
+
+---
+
+## Custom domain setup
+
+For a proper domain, [Cloudflare Registrar](https://www.cloudflare.com/products/registrar/) sells domains at cost with no markup and provides excellent DNS management.
+
+The recommended structure for hosting multiple games under one domain:
+
+```
+your-domain.com                 → landing page (future)
+callsheet.your-domain.com       → Callsheet
+othergame.your-domain.com       → future games
+```
+
+### 1. Add DNS records in Cloudflare
+
+Go to your domain → **DNS → Records** and add:
+
+| Type | Name | IPv4 address | Proxy status |
+|---|---|---|---|
+| A | `*` | `<your-server-ip>` | DNS only (grey cloud) |
+| A | `@` | `<your-server-ip>` | DNS only (grey cloud) |
+
+The wildcard `*` record covers all subdomains automatically — you never need to touch DNS again when adding new games.
+
+**Important:** Keep proxy status as **DNS only** (grey cloud). Cloudflare's orange-cloud proxy intercepts HTTPS and conflicts with Caddy's Let's Encrypt cert process.
+
+### 2. Update the server's `.env`
+
+SSH into the server and update `CALLSHEET_HOST`:
+
+```bash
+cd ~/projects/callsheet-deploy
+nano .env
+# set CALLSHEET_HOST=callsheet.your-domain.com
+```
+
+### 3. Recreate the Caddy container
+
+`docker compose restart` keeps the old environment. Use `up -d` to recreate with the new env vars:
+
+```bash
+docker compose up -d caddy
+```
+
+Caddy will automatically obtain a new Let's Encrypt cert for the new hostname within seconds of the first request.
 
 ---
 
 ## Continuous deployment via GitHub Actions
 
-Every repo has a `.github/workflows/deploy.yml` that SSHes into the server and runs `deploy.sh` whenever `main` is pushed. The same three secrets must be added to **each** of the three repos.
+`callsheet-deploy` is the single source of truth for all deployment logic and secrets. App repos (`callsheet-api`, `callsheet-ui`) know nothing about the server — they only fire a trigger event when pushed.
+
+### How deploys work
+
+```
+Push to main (any repo)
+  → GitHub Actions fires repository_dispatch → callsheet-deploy
+
+callsheet-deploy receives dispatch (or is pushed directly)
+  → GitHub Actions
+    → SSH into server
+      → write .env from GitHub secrets
+      → scripts/deploy.sh
+        → git pull (all three repos)
+        → docker compose up --build -d --remove-orphans
+```
 
 ### Generate a deploy SSH key (on your local machine)
 
@@ -199,19 +262,29 @@ cat ~/.ssh/callsheet_deploy.pub | ssh ubuntu@<server-ip> "cat >> ~/.ssh/authoriz
 
 ### Add secrets to GitHub
 
-For each of the three repos, go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+**`callsheet-deploy` — all deploy secrets live here:**
 
 | Secret | Value |
 |---|---|
 | `DEPLOY_HOST` | The server's public IP address |
 | `DEPLOY_USER` | `ubuntu` |
-| `DEPLOY_SSH_KEY` | The contents of `~/.ssh/callsheet_deploy` (the **private** key — no `.pub`) |
+| `DEPLOY_SSH_KEY` | Contents of `~/.ssh/callsheet_deploy` (private key, no `.pub`) |
+| `TMDB_API_KEY` | Your TMDB API key |
+| `CALLSHEET_HOST` | Your hostname (e.g. `callsheet.black-inc.dev`) |
 
 To get the private key contents:
 ```bash
 cat ~/.ssh/callsheet_deploy
 ```
 Copy everything including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----` lines.
+
+**`callsheet-api` and `callsheet-ui` — one secret each:**
+
+| Secret | Value |
+|---|---|
+| `GH_PAT` | A GitHub Personal Access Token with `repo` scope |
+
+To create a PAT: GitHub → **Settings → Developer settings → Personal access tokens → Tokens (classic)** → New token → check `repo` scope.
 
 ### Test the pipeline
 
@@ -221,18 +294,7 @@ git commit --allow-empty -m "test: trigger CD pipeline"
 git push
 ```
 
-Go to the repo on GitHub → **Actions** and watch the workflow run.
-
-### How deploys work
-
-```
-Push to main (any repo)
-  → GitHub Actions
-    → SSH into server
-      → scripts/deploy.sh
-        → git pull (all three repos)
-        → docker compose up --build -d --remove-orphans
-```
+Go to the repo on GitHub → **Actions** and watch the workflow run. For app repos, the workflow fires a dispatch event and the actual deploy will appear in `callsheet-deploy`'s Actions tab.
 
 ---
 
