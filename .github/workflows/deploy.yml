@@ -7,58 +7,9 @@ on:
   repository_dispatch:
     types: [deploy]
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_OWNER: ${{ github.repository_owner }}
-
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Set lowercase image owner
-        run: echo "IMAGE_OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check out UI
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/callsheet-ui
-          path: callsheet-ui
-          token: ${{ secrets.GH_PAT }}
-
-      - name: Check out API
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/callsheet-api
-          path: callsheet-api
-          token: ${{ secrets.GH_PAT }}
-
-      - name: Build and push UI image
-        uses: docker/build-push-action@v5
-        with:
-          context: callsheet-ui
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/callsheet-ui:latest
-
-      - name: Build and push API image
-        uses: docker/build-push-action@v5
-        with:
-          context: callsheet-api
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/callsheet-api:latest
-
   deploy:
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
@@ -68,9 +19,9 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             IMAGE_OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
-            cat > ~/projects/callsheet-deploy/.env <<EOF
+            cat > ~/projects/callsheet-deploy/.env <<'EOF'
             TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
             CALLSHEET_HOST=${{ secrets.CALLSHEET_HOST }}
-            IMAGE_OWNER=$IMAGE_OWNER
             EOF
+            echo "IMAGE_OWNER=$IMAGE_OWNER" >> ~/projects/callsheet-deploy/.env
             bash ~/projects/callsheet-deploy/scripts/deploy.sh
