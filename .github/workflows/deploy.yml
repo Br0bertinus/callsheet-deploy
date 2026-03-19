@@ -67,9 +67,10 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cat > ~/projects/callsheet-deploy/.env <<'EOF'
+            IMAGE_OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+            cat > ~/projects/callsheet-deploy/.env <<EOF
             TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
             CALLSHEET_HOST=${{ secrets.CALLSHEET_HOST }}
-            IMAGE_OWNER=${{ github.repository_owner }}
+            IMAGE_OWNER=$IMAGE_OWNER
             EOF
-            ~/projects/callsheet-deploy/scripts/deploy.sh
+            bash ~/projects/callsheet-deploy/scripts/deploy.sh
