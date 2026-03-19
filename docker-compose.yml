@@ -15,14 +15,14 @@ services:
       - ui
 
   ui:
-    build: ../callsheet-ui
+    image: ghcr.io/${IMAGE_OWNER}/callsheet-ui:latest
     # Not exposed to the host — all traffic reaches the UI through Caddy
     restart: unless-stopped
     depends_on:
       - api
 
   api:
-    build: ../callsheet-api
+    image: ghcr.io/${IMAGE_OWNER}/callsheet-api:latest
     # Not exposed to the host — all traffic reaches the API through the Nginx proxy in the ui container
     restart: unless-stopped
     environment:

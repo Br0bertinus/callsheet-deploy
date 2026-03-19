@@ -6,15 +6,15 @@ set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECTS_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
 
-echo "==> Pulling latest code..."
-for repo in callsheet-api callsheet-ui callsheet-deploy; do
-  git -C "$PROJECTS_DIR/$repo" fetch origin
-  git -C "$PROJECTS_DIR/$repo" reset --hard origin/HEAD
-done
+echo "==> Pulling latest deploy config..."
+git -C "$DEPLOY_DIR" fetch origin
+git -C "$DEPLOY_DIR" reset --hard origin/HEAD
 
-echo "==> Rebuilding and restarting containers..."
+echo "==> Pulling latest images..."
 cd "$DEPLOY_DIR"
-docker compose build --no-cache
+docker compose pull
+
+echo "==> Restarting containers..."
 docker compose up -d --remove-orphans
 
 echo "==> Done."
