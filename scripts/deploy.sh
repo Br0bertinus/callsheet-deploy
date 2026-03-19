@@ -19,3 +19,18 @@ docker compose up -d --remove-orphans
 
 echo "==> Done."
 docker compose ps
+
+echo "==> Health check..."
+sleep 5
+UNHEALTHY=$(docker compose ps --format json | python3 -c "
+import sys, json
+procs = [json.loads(l) for l in sys.stdin if l.strip()]
+bad = [p['Name'] for p in procs if p['State'] != 'running']
+print('\n'.join(bad))
+")
+if [ -n "$UNHEALTHY" ]; then
+  echo "ERROR: the following containers are not running:"
+  echo "$UNHEALTHY"
+  exit 1
+fi
+echo "All containers healthy."
