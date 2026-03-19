@@ -2,14 +2,7 @@
 
 Deployment configuration for the Callsheet application.
 
-This repo contains no application code — it orchestrates the UI and API services and owns all deployment config. Both app repos must be cloned as siblings of this directory:
-
-```
-projects/
-  callsheet-deploy/   ← this repo
-  callsheet-ui/
-  callsheet-api/
-```
+This repo contains no application code — it owns the Docker Compose stack, Caddy config, and all deployment secrets. Only this repo needs to be cloned on the server; Docker images are built in CI and pulled from GHCR.
 
 ## How it works
 
@@ -142,41 +135,52 @@ Verify it works:
 docker run hello-world
 ```
 
-### 7. Clone all three repos
+### 7. Clone this repo on the VM
+
+Only `callsheet-deploy` needs to be on the server. Docker images for the UI and API are built in GitHub Actions and pulled from GHCR.
 
 ```bash
 mkdir ~/projects && cd ~/projects
-git clone https://github.com/<you>/callsheet-api.git
-git clone https://github.com/<you>/callsheet-ui.git
 git clone https://github.com/<you>/callsheet-deploy.git
 ```
 
-Note: GitHub no longer accepts passwords for HTTPS clones. If your repos are private, use a Personal Access Token (GitHub → **Settings → Developer settings → Personal access tokens → Tokens (classic)**) as the password when prompted.
+If the repo is private, use a Personal Access Token (GitHub → **Settings → Developer settings → Personal access tokens → Tokens (classic)**) as the password when prompted.
 
-### 8. Create the `.env` file
+### 8. Log into GHCR on the VM
+
+The server needs to pull private images from GitHub Container Registry. Use your Personal Access Token (needs `read:packages` scope):
+
+```bash
+echo "<your-token>" | docker login ghcr.io -u <your-github-username> --password-stdin
+```
+
+### 9. Create the `.env` file
 
 ```bash
 cd ~/projects/callsheet-deploy
 cat > .env <<'EOF'
-TMDB_API_KEY=your_tmdb_api_key_here
+TMDB_API_KEY=your_tmdb_v4_read_access_token_here
 CALLSHEET_HOST=callsheet.your-domain.com
 EOF
+echo "IMAGE_OWNER=your-github-username-lowercase" >> .env
 ```
 
-Replace `callsheet.your-domain.com` with your actual hostname (see [Custom domain setup](#custom-domain-setup) below).
+**Important:** `TMDB_API_KEY` must be the **v4 Read Access Token** (a long JWT), not the short v3 API key. Find it at themoviedb.org → Settings → API → **API Read Access Token**.
 
-If you don't have a domain yet, you can use `<server-public-ip>.sslip.io` as a temporary hostname — [sslip.io](https://sslip.io) resolves `<ip>.sslip.io` to `<ip>` with no DNS registration needed.
+Replace `callsheet.your-domain.com` with your actual hostname (see [Custom domain setup](#custom-domain-setup) below). If you don't have a domain yet, you can use `<server-public-ip>.sslip.io` as a temporary hostname — [sslip.io](https://sslip.io) resolves `<ip>.sslip.io` to `<ip>` with no DNS registration needed.
 
-### 9. First deploy
+The `.env` is gitignored and will be overwritten on every automated deploy with values from GitHub secrets.
+
+### 10. First deploy
 
 ```bash
-chmod +x ~/projects/callsheet-deploy/scripts/deploy.sh
-~/projects/callsheet-deploy/scripts/deploy.sh
+cd ~/projects/callsheet-deploy
+bash scripts/deploy.sh
 ```
 
-The first build takes a few minutes. When it completes, all three containers should show `Up` in the status table.
+The script pulls the latest images from GHCR and starts all three containers. Make sure CI has already run at least once in `callsheet-ui` and `callsheet-api` to push images before running this — otherwise there's nothing to pull.
 
-The app will be live at your configured hostname once Caddy obtains its TLS certificate (usually a few seconds after first request).
+When it completes, all three containers should show `Up` in the status table. The app will be live at your configured hostname once Caddy obtains its TLS certificate (usually a few seconds after the first request).
 
 ---
 
@@ -229,22 +233,32 @@ Caddy will automatically obtain a new Let's Encrypt cert for the new hostname wi
 
 ## Continuous deployment via GitHub Actions
 
-`callsheet-deploy` is the single source of truth for all deployment logic and secrets. App repos (`callsheet-api`, `callsheet-ui`) know nothing about the server — they only fire a trigger event when pushed.
+CI and CD are intentionally separated across repos:
+
+- **`callsheet-ui` and `callsheet-api`** own CI — they build Docker images and push them to GHCR, then fire a deploy trigger.
+- **`callsheet-deploy`** owns CD — it receives the trigger, SSHes into the server, and runs `scripts/deploy.sh`, which only pulls the pre-built images and restarts the stack.
 
 ### How deploys work
 
 ```
-Push to main (any repo)
-  → GitHub Actions fires repository_dispatch → callsheet-deploy
+Push to main in callsheet-ui or callsheet-api
+  → GitHub Actions (CI):
+      → build Docker image
+      → push to GHCR (ghcr.io/<owner>/<repo>:latest and :<git-sha>)
+      → fire repository_dispatch → callsheet-deploy
 
-callsheet-deploy receives dispatch (or is pushed directly)
-  → GitHub Actions
-    → SSH into server
-      → write .env from GitHub secrets
-      → scripts/deploy.sh
-        → git pull (all three repos)
-        → docker compose up --build -d --remove-orphans
+callsheet-deploy receives dispatch (or is pushed/triggered directly)
+  → GitHub Actions (CD):
+      → SSH into server
+        → write .env from GitHub secrets
+        → scripts/deploy.sh
+            → git pull (callsheet-deploy only)
+            → docker compose pull
+            → docker compose up -d --remove-orphans
+            → health check (verify all containers are running)
 ```
+
+The SHA tag on each image provides a rollback path if needed.
 
 ### Generate a deploy SSH key (on your local machine)
 
@@ -269,8 +283,8 @@ cat ~/.ssh/callsheet_deploy.pub | ssh ubuntu@<server-ip> "cat >> ~/.ssh/authoriz
 | `DEPLOY_HOST` | The server's public IP address |
 | `DEPLOY_USER` | `ubuntu` |
 | `DEPLOY_SSH_KEY` | Contents of `~/.ssh/callsheet_deploy` (private key, no `.pub`) |
-| `TMDB_API_KEY` | Your TMDB API key |
-| `CALLSHEET_HOST` | Your hostname (e.g. `callsheet.black-inc.dev`) |
+| `TMDB_API_KEY` | Your TMDB **v4 Read Access Token** (long JWT — not the short v3 API key) |
+| `CALLSHEET_HOST` | Your hostname (e.g. `callsheet.your-domain.com`) |
 
 To get the private key contents:
 ```bash
@@ -282,19 +296,19 @@ Copy everything including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----EN
 
 | Secret | Value |
 |---|---|
-| `GH_PAT` | A GitHub Personal Access Token with `repo` scope |
+| `GH_PAT` | A GitHub Personal Access Token (classic) with `repo` and `write:packages` scope |
 
-To create a PAT: GitHub → **Settings → Developer settings → Personal access tokens → Tokens (classic)** → New token → check `repo` scope.
+This token is used to push images to GHCR and to trigger the deploy dispatch. Create one at: GitHub → **Settings → Developer settings → Personal access tokens → Tokens (classic)**.
 
 ### Test the pipeline
 
 ```bash
-cd path/to/any-of-the-three-repos
+cd path/to/callsheet-ui  # or callsheet-api
 git commit --allow-empty -m "test: trigger CD pipeline"
 git push
 ```
 
-Go to the repo on GitHub → **Actions** and watch the workflow run. For app repos, the workflow fires a dispatch event and the actual deploy will appear in `callsheet-deploy`'s Actions tab.
+Go to the repo on GitHub → **Actions** and watch the CI workflow run. When it completes, the deploy will appear in `callsheet-deploy`'s Actions tab. You can also trigger a deploy directly from `callsheet-deploy` → Actions → Deploy → **Run workflow**.
 
 ---
 
@@ -307,8 +321,11 @@ docker compose logs -f
 # Follow logs from one container
 docker compose logs -f api
 
-# Rebuild and restart without pulling new code
-cd ~/projects/callsheet-deploy && docker compose up --build -d
+# Pull latest images and restart (same as what deploy.sh does)
+cd ~/projects/callsheet-deploy && docker compose pull && docker compose up -d
+
+# Restart with the current images (no pull)
+docker compose up -d
 
 # Stop everything
 docker compose down
