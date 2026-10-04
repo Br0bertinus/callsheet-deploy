@@ -1,3 +1,7 @@
 {$CALLSHEET_HOST} {
     reverse_proxy ui:80
 }
+
+japan.black-inc.dev {
+    reverse_proxy japan-plan-ui:80
+}

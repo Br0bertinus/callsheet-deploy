@@ -312,6 +312,18 @@ Go to the repo on GitHub → **Actions** and watch the CI workflow run. When it 
 
 ---
 
+## Hosting other apps on this server
+
+This repo's Caddy is the only thing bound to ports 80/443, so it also fronts other apps on the VM. Each app has its own deploy repo that runs its containers; this repo only holds the routing.
+
+- Compose defines a shared network named `web` and attaches Caddy to it. Other stacks join it with `external: true`.
+- Each extra app gets a site block in the `Caddyfile` that proxies to its container name, e.g. `japan.black-inc.dev` → `japan-plan-ui:80` (see [japan-plan-deploy](https://github.com/Br0bertinus/japan-plan-deploy), which documents the reasoning).
+- New subdomains need no DNS change thanks to the wildcard record.
+- **Caddyfile changes need `docker compose up -d --force-recreate caddy`.** `deploy.sh` does `git reset --hard`, which replaces the bind-mounted file, so a running Caddy keeps reading the old one.
+- This stack must be deployed first so the `web` network exists before other stacks start.
+
+---
+
 ## Useful commands
 
 ```bash

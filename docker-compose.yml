@@ -11,6 +11,9 @@ services:
       - caddy_config:/config
     environment:
       - CALLSHEET_HOST=${CALLSHEET_HOST}
+    networks:
+      - default
+      - web
     depends_on:
       - ui
 
@@ -31,3 +34,8 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+
+# Shared with other apps' deploy repos (e.g. japan-plan-deploy) so Caddy can reach their containers.
+networks:
+  web:
+    name: web
